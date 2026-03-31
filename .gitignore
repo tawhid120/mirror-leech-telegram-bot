@@ -14,3 +14,5 @@ list_drives.txt
 cookies.txt
 downloads/*
 *.session
+*.pyc
+__pycache__/
