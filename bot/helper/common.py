@@ -279,8 +279,9 @@ class TaskConfig:
             elif (not self.up_dest and default_upload == "gd") or self.up_dest == "gd":
                 self.up_dest = self.user_dict.get("GDRIVE_ID") or Config.GDRIVE_ID
             if not self.up_dest:
-                raise ValueError("No Upload Destination!")
-            if self.up_dest not in ["rcl", "gdl"]:
+                if self.is_clone:
+                    raise ValueError("No Upload Destination configured for clone operation!")
+            elif self.up_dest not in ["rcl", "gdl"]:
                 if is_gdrive_id(self.up_dest):
                     if not self.up_dest.startswith(
                         ("mtp:", "tp:", "sa:")

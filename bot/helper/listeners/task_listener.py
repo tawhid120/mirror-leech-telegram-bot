@@ -31,16 +31,8 @@ from ..ext_utils.files_utils import (
     remove_non_included_files,
     move_and_merge,
 )
-from ..ext_utils.links_utils import is_gdrive_id
 from ..ext_utils.status_utils import get_readable_file_size
-from ..ext_utils.task_manager import start_from_queued, check_running_tasks
-from ..mirror_leech_utils.gdrive_utils.upload import GoogleDriveUpload
-from ..mirror_leech_utils.rclone_utils.transfer import RcloneTransferHelper
-from ..mirror_leech_utils.status_utils.gdrive_status import GoogleDriveStatus
-from ..mirror_leech_utils.status_utils.queue_status import QueueStatus
-from ..mirror_leech_utils.status_utils.rclone_status import RcloneStatus
-from ..mirror_leech_utils.status_utils.telegram_status import TelegramStatus
-from ..mirror_leech_utils.telegram_uploader import TelegramUploader
+from ..ext_utils.task_manager import start_from_queued
 from ..telegram_helper.button_build import ButtonMaker
 from ..telegram_helper.message_utils import (
     send_message,
@@ -278,50 +270,37 @@ class TaskListener(TaskConfig):
 
         self.subproc = None
 
-        add_to_queue, event = await check_running_tasks(self, "up")
-        await start_from_queued()
-        if add_to_queue:
-            LOGGER.info(f"Added to Queue/Upload: {self.name}")
-            async with task_dict_lock:
-                task_dict[self.mid] = QueueStatus(self, gid, "Up")
-            await event.wait()
-            if self.is_cancelled:
-                return
-            LOGGER.info(f"Start from Queued/Upload: {self.name}")
-
         self.size = await get_path_size(up_dir)
-
-        if self.is_leech:
-            LOGGER.info(f"Leech Name: {self.name}")
-            tg = TelegramUploader(self, up_dir)
-            async with task_dict_lock:
-                task_dict[self.mid] = TelegramStatus(self, tg, gid, "up")
-            await gather(
-                update_status_message(self.message.chat.id),
-                tg.upload(),
-            )
-            del tg
-        elif is_gdrive_id(self.up_dest):
-            LOGGER.info(f"Gdrive Upload Name: {self.name}")
-            drive = GoogleDriveUpload(self, up_path)
-            async with task_dict_lock:
-                task_dict[self.mid] = GoogleDriveStatus(self, drive, gid, "up")
-            await gather(
-                update_status_message(self.message.chat.id),
-                sync_to_async(drive.upload),
-            )
-            del drive
-        else:
-            LOGGER.info(f"Rclone Upload Name: {self.name}")
-            RCTransfer = RcloneTransferHelper(self)
-            async with task_dict_lock:
-                task_dict[self.mid] = RcloneStatus(self, RCTransfer, gid, "up")
-            await gather(
-                update_status_message(self.message.chat.id),
-                RCTransfer.upload(up_path),
-            )
-            del RCTransfer
+        LOGGER.info(f"Download Name: {self.name}")
+        await self.on_download_only_complete(up_path)
         return
+
+    async def on_download_only_complete(self, up_path):
+        if (
+            self.is_super_chat
+            and Config.INCOMPLETE_TASK_NOTIFIER
+            and Config.DATABASE_URL
+        ):
+            await database.rm_complete_task(self.message.link)
+        msg = f"<b>Name: </b><code>{escape(self.name)}</code>\n\n<b>Size: </b>{get_readable_file_size(self.size)}"
+        LOGGER.info(f"Download Done: {self.name}")
+        msg += f"\n<b>Path: </b><code>{up_path}</code>"
+        msg += f"\n\n<b>cc: </b>{self.tag}"
+        await send_message(self.message, msg)
+        async with task_dict_lock:
+            if self.mid in task_dict:
+                del task_dict[self.mid]
+            count = len(task_dict)
+        if count == 0:
+            await self.clean()
+        else:
+            await update_status_message(self.message.chat.id)
+        async with queue_dict_lock:
+            if self.mid in non_queued_dl:
+                non_queued_dl.remove(self.mid)
+            if self.mid in non_queued_up:
+                non_queued_up.remove(self.mid)
+        await start_from_queued()
 
     async def on_upload_complete(
         self, link, files, folders, mime_type, rclone_path="", dir_id=""
