@@ -70,13 +70,6 @@ def add_handlers():
     )
     TgClient.bot.add_handler(
         MessageHandler(
-            clone_node,
-            filters=command(BotCommands.CloneCommand, case_sensitive=True)
-            & CustomFilters.authorized,
-        )
-    )
-    TgClient.bot.add_handler(
-        MessageHandler(
             aioexecute,
             filters=command(BotCommands.AExecCommand, case_sensitive=True)
             & CustomFilters.owner,
